@@ -81,7 +81,8 @@ const DUST_ABI = [
       uint256 maxFee,
       uint32 minFinalityThreshold,
       tuple(address refundAddress, bytes signedQuote, bytes instructions) executorArgs,
-      tuple(uint16 dbps, address payee) feeArgs
+      tuple(uint16 dbps, address payee) feeArgs,
+      uint256 estimatedCost
     ),
     address[] pullTokens,
     uint256[] pullAmounts
@@ -389,7 +390,8 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
         feeArgs: {
           dbps: FEE_DBPS,
           payee: FEE_PAYEE
-        }
+        },
+        estimatedCost: actualMsgValue  // 🎯 新增：将 actualMsgValue 作为 estimatedCost 参数传递
       },
       TOKENS.map(t => t.addr),
       TOKENS.map(t => t.amtWei),
@@ -412,6 +414,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       console.log(`✅ Transaction confirmed in block: ${rc.blockNumber}`);
       console.log(`⛽ Gas used: ${rc.gasUsed}`);
       console.log(`💰 Total cost: ${actualMsgValue} wei`);
+      console.log(`💰 Estimated cost parameter: ${actualMsgValue} wei`);
       
       if (EXECUTION_MODE === 'gas') {
         console.log('\n📋 NEXT STEPS (GAS Mode):');
