@@ -165,11 +165,10 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
     // 🔄 模式1: GasDropOffInstruction - 自动发送到指定地址
     if (apiDstChain === 1) {
       // Solana: 使用 GasInstruction（Solana 不支持 dropOff）
-      console.log(`🔧 Solana detected - using GasInstruction (dropOff not supported)`);
-      const solanaGasHex = SOLANA_GAS_LIMIT.toString(16).padStart(32, '0');
+      const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
       return '0x01' +                              // Type 1: GasInstruction
-             solanaGasHex +                        // gasLimit: 动态设置的 CU (16 bytes)
-             '00000000000000000000000000000000';   // msgValue: 0 (16 bytes)
+             dropOffHex +                        // gasLimit: 动态设置的 CU (16 bytes)
+             '000000000000000000000000000f4240';   // msgValue: 0 (16 bytes)
     } else {
       // EVM 链: 使用 GasDropOffInstruction
       console.log(`🔧 Using GasDropOffInstruction for EVM chain`);
@@ -191,29 +190,41 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
     }
   } else {
     // 🚀 模式2: GasInstruction - 需要手动领取
-    console.log(`🔧 Using GasInstruction mode (manual claim required)`);
+    console.log(`🔧 Using GasInstruction mode (manual gas required)`);
     
     let gasLimit;
     if (apiDstChain === 1) {
-      // Solana: 使用更高的计算单位 - 1,400,000 CU
+      // Solana: 使用更高的计算单位 - 1,000,000 CU
       gasLimit = SOLANA_GAS_LIMIT.toString(16).padStart(32, '0'); // 动态设置
+
+      const result = '0x01' +                        // Type 1: GasInstruction
+             gasLimit +                              // gasLimit: 16 bytes
+             '000000000000000000000000000f4240';    //manually set to 1,000,000 CU
+
       console.log(`🔧 Solana gasLimit: ${SOLANA_GAS_LIMIT} CU`);
-    } else {
-      // EVM 链: 200,000 gas (参考成功案例)
-      gasLimit = '00000000000000000000000000030d40'; // 200,000 gas
       console.log(`🔧 EVM gasLimit: 200,000 gas`);
+      console.log(`🔧 GasLimit (16 bytes): ${gasLimit}`);
+      console.log(`🔧 MsgValue (16 bytes): 000000000000000000000000000f4240`);
+      console.log(`🔧 Final relayInstructions: ${result}`);
+      console.log(`🔧 Total length: ${result.length} chars (should be 66)`);
+      return  result;
+    } else {
+      // EVM limited: 200,000 gas 
+      gasLimit = '00000000000000000000000000030d40'; // 200,000 gas
+
+      const result = '0x01' +                        // Type 1: GasInstruction
+                     gasLimit +                      // gasLimit: 16 bytes
+                     '00000000000000000000000000000000'; // msgValue: 0 (16 bytes)
+      console.log(`🔧 EVM gasLimit: 200,000 gas`);
+      console.log(`🔧 GasLimit (16 bytes): ${gasLimit}`);
+      console.log(`🔧 MsgValue (16 bytes): 00000000000000000000000000000000`);
+      console.log(`🔧 Final relayInstructions: ${result}`);
+      console.log(`🔧 Total length: ${result.length} chars (should be 66)`);
+
+      return result;
     }
     
-    const result = '0x01' +                        // Type 1: GasInstruction
-                   gasLimit +                      // gasLimit: 16 bytes
-                   '00000000000000000000000000000000'; // msgValue: 0 (16 bytes)
-    
-    console.log(`🔧 GasLimit (16 bytes): ${gasLimit}`);
-    console.log(`🔧 MsgValue (16 bytes): 00000000000000000000000000000000`);
-    console.log(`🔧 Final relayInstructions: ${result}`);
-    console.log(`🔧 Total length: ${result.length} chars (should be 66)`);
-    
-    return result;
+
   }
 }
 
@@ -419,11 +430,11 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       if (EXECUTION_MODE === 'gas') {
         console.log('\n📋 NEXT STEPS (GAS Mode):');
         console.log('🏷️  Your funds are being transferred cross-chain');
-        console.log('⏰ You will need to manually claim them on the destination chain');
+        console.log('⏰ You will need to manually deposit gas on the destination chain');
         console.log('🔍 Check the executor status for completion');
       } else {
         console.log('\n📋 NEXT STEPS (DROP Mode):');
-        console.log('📦 Funds should automatically arrive at your recipient address');
+        console.log('📦 gas should automatically arrive at your recipient address');
         console.log('🔍 Check your destination chain balance');
       }
       
