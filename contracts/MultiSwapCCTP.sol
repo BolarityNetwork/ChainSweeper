@@ -63,6 +63,7 @@ contract DustCollectorUniversalPermit2 is Ownable {
         uint32 minFinalityThreshold;
         ExecutorArgs executorArgs;
         FeeArgs feeArgs;
+        uint256 estimatedCost;
     }
 
     event FeeCollected(address indexed token, uint256 amount);
@@ -93,7 +94,7 @@ contract DustCollectorUniversalPermit2 is Ownable {
 
         _pullAndForward(pullTokens, pullAmounts);
         uint256 received = _executeSwap(params);
-        _handleResult(params, received, msg.value);
+        _handleResult(params, received);
     }
 
     function _pullAndForward(address[] calldata tokens, uint256[] calldata amounts) internal {
@@ -105,13 +106,15 @@ contract DustCollectorUniversalPermit2 is Ownable {
 
     function _executeSwap(SwapParams calldata p) internal returns (uint256) {
         uint256 beforeBal = IERC20(p.targetToken).balanceOf(address(this));
-        router.execute{value: 0}(p.commands, p.inputs, p.deadline);
+        require(msg.value >= p.estimatedCost, "Insufficient eth funds.");
+        uint256 routerEth = msg.value - p.estimatedCost;
+        router.execute{value: routerEth}(p.commands, p.inputs, p.deadline);
         uint256 afterBal = IERC20(p.targetToken).balanceOf(address(this));
         require(afterBal > beforeBal, "no output");
         return afterBal - beforeBal;
     }
 
-    function _handleResult(SwapParams calldata p, uint256 received, uint256 msgValue) internal {
+    function _handleResult(SwapParams calldata p, uint256 received) internal {
         uint256 feeAmt = received * feeBps / 10_000;
         uint256 userAmt = received - feeAmt;
 
@@ -124,15 +127,15 @@ contract DustCollectorUniversalPermit2 is Ownable {
             IERC20(p.targetToken).safeTransfer(msg.sender, userAmt);
             emit Swapped(msg.sender, p.targetToken, userAmt);
         } else {
-            _bridgeWithCCTP(p, userAmt, msgValue);
+            _bridgeWithCCTP(p, userAmt);
         }
     }
 
-    function _bridgeWithCCTP(SwapParams calldata p, uint256 amount, uint256 msgValue) internal {
+    function _bridgeWithCCTP(SwapParams calldata p, uint256 amount) internal {
         IERC20 token = IERC20(p.targetToken);
         token.safeIncreaseAllowance(address(cctp), amount);
 
-        cctp.depositForBurn{value: msgValue}(
+        cctp.depositForBurn{value: p.estimatedCost}(
             amount,
             p.dstChain,
             p.dstDomain,
