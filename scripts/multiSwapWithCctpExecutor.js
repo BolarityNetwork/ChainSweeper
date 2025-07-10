@@ -166,7 +166,7 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
     if (apiDstChain === 1) {
       // Solana: 使用 GasInstruction（Solana 不支持 dropOff）
       const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
-      return '0x02' +                              // Type 1: GasInstruction
+      return '0x02' +                              // Type 1: GasDropOffInstruction
              dropOffHex +                        // gasLimit: 动态设置的 CU (16 bytes)
              '000000000000000000000000000f4240';   // msgValue: 0 (16 bytes)
     } else {
