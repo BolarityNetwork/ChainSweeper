@@ -162,11 +162,11 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
   console.log(`🎯 Execution Mode: ${mode.toUpperCase()}`);
   
   if (mode === 'drop') {
-    // 🔄 模式1: GasDropOffInstruction - 自动发送到指定地址
+    // 🔄 模式1: GasDropOffInstruction - 自动gas发送到指定地址
     if (apiDstChain === 1) {
       // Solana: 使用 GasInstruction（Solana 不支持 dropOff）
       const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
-      return '0x01' +                              // Type 1: GasInstruction
+      return '0x02' +                              // Type 1: GasInstruction
              dropOffHex +                        // gasLimit: 动态设置的 CU (16 bytes)
              '000000000000000000000000000f4240';   // msgValue: 0 (16 bytes)
     } else {
@@ -189,7 +189,7 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
       return result;
     }
   } else {
-    // 🚀 模式2: GasInstruction - 需要手动领取
+    // 🚀 模式2: GasInstruction - 需要手动deposit gas
     console.log(`🔧 Using GasInstruction mode (manual gas required)`);
     
     let gasLimit;
