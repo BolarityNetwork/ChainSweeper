@@ -180,5 +180,12 @@ contract DustCollectorUniversalPermit2 is Ownable {
         IERC20(t).safeTransfer(to, amt);
     }
 
+    function rescueETH(address payable to, uint256 amt) external onlyOwner {
+        require(to != address(0), "zero addr");
+        require(amt <= address(this).balance, "insufficient balance");
+        (bool success, ) = to.call{value: amt}("");
+        require(success, "ETH transfer failed");
+    }
+
     receive() external payable {}
 }
