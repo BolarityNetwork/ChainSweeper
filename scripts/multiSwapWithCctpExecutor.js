@@ -290,14 +290,14 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
       }
     });
     
-    // 2. 🆕 For Solana, also add GasInstruction to set compute unit limit
+    // 2. 🆕  also add GasInstruction to set compute unit limit
     if (apiDstChain === 1) {
       console.log(`   🚀 Adding GasInstruction for Solana compute unit limit`);
       instructions.push({
         request: {
           type: "GasInstruction",
           gasLimit: SOLANA_GAS_LIMIT,  // 1.4M CU
-          msgValue: 5000000n  // No additional msg value needed
+          msgValue: 5000000n  // msg value needed
         }
       });
     }else {
