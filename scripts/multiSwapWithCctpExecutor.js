@@ -1,4 +1,4 @@
-// scripts/dust-executor.ts
+// scripts/dust-executor.js
 import 'dotenv/config';
 import {
   parseUnits, solidityPacked, AbiCoder,
@@ -7,6 +7,7 @@ import {
 import { JsonRpcProvider } from 'ethers';
 import axios from 'axios';
 import { createHash } from 'crypto';
+import { serialize } from 'binary-layout';
 
 console.log("\n🚀 DustCollector Executor Script");
 console.log("🧪 Powered by Permit2 + Wormhole CCTP v2 + Executor");
@@ -47,6 +48,7 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8kn
 const EXECUTION_MODE = process.env.EXECUTION_MODE || 'gas'; // 'gas' or 'drop'
 const GAS_DROP_LIMIT = BigInt(process.env.GAS_DROP_LIMIT || '500000'); // gas limit for drop mode
 const SOLANA_GAS_LIMIT = BigInt(process.env.SOLANA_GAS_LIMIT || '1400000'); // Solana specific gas limit (CU)
+const SOLANA_GAS_DROP = BigInt(process.env.SOLANA_GAS_DROP || '500000');
 
 // Display execution mode info
 console.log(`🎯 Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
@@ -106,6 +108,50 @@ const PERMIT2_ABI = [
   'function allowance(address user, address token, address spender) external view returns (uint160,uint48,uint48)'
 ];
 
+// 🔧 Binary Layout Definitions
+// Custom conversion for hex strings (JavaScript version)
+const hexConversion = {
+  to: (encoded) => {
+    return `0x${Buffer.from(encoded).toString('hex')}`;
+  },
+  from: (decoded) => {
+    const hex = decoded.startsWith('0x') ? decoded.slice(2) : decoded;
+    return Uint8Array.from(Buffer.from(hex, 'hex'));
+  },
+};
+
+// Define instruction layouts according to official spec
+const gasInstructionLayout = [
+  { name: "gasLimit", binary: "uint", size: 16 },
+  { name: "msgValue", binary: "uint", size: 16 },
+];
+
+const gasDropOffInstructionLayout = [
+  { name: "dropOff", binary: "uint", size: 16 },
+  { name: "recipient", binary: "bytes", size: 32, custom: hexConversion },
+];
+
+const relayInstructionLayout = [
+  {
+    name: "request",
+    binary: "switch",
+    idSize: 1,
+    idTag: "type",
+    layouts: [
+      [[1, "GasInstruction"], gasInstructionLayout],
+      [[2, "GasDropOffInstruction"], gasDropOffInstructionLayout],
+    ],
+  },
+];
+
+const relayInstructionsLayout = [
+  {
+    name: "requests",
+    binary: "array",
+    layout: relayInstructionLayout,
+  },
+];
+
 // 🔧 Base58 encode/decode functions
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
@@ -155,82 +201,8 @@ async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
   console.log(`   👛 Wallet: ${walletAddress}`);
   console.log(`   🪙 Token Mint: ${tokenMintAddress}`);
   
-  // Decode addresses
-  const wallet = base58Decode(walletAddress);
-  const tokenMint = base58Decode(tokenMintAddress);
-  const tokenProgramId = base58Decode(TOKEN_PROGRAM_ID);
-  const associatedTokenProgramId = base58Decode(ASSOCIATED_TOKEN_PROGRAM_ID);
-  
-  // Build seeds
-  const seeds = [
-    wallet,
-    tokenProgramId,
-    tokenMint
-  ];
-  
-  // Find PDA
-  let nonce = 255;
-  let address;
-  
-  while (nonce >= 0) {
-    try {
-      const seedsWithNonce = [
-        ...seeds,
-        Buffer.from([nonce]),
-        associatedTokenProgramId
-      ];
-      
-      const hash = createHash('sha256');
-      hash.update(Buffer.concat(seedsWithNonce));
-      const hashResult = hash.digest();
-      
-      // Check if on ed25519 curve
-      // This is a simplified check, actual PDA validation is more complex
-      // Usually nonce = 255 works
-      if (nonce === 255) {
-        // ATA typically uses nonce 255
-        const message = Buffer.concat([
-          ...seeds,
-          Buffer.from('ProgramDerivedAddress'),
-          Buffer.from([nonce]),
-          associatedTokenProgramId
-        ]);
-        
-        const hash = createHash('sha256');
-        hash.update(message);
-        address = hash.digest();
-        break;
-      }
-      
-      nonce--;
-    } catch (e) {
-      nonce--;
-    }
-  }
-  
-  if (!address) {
-    throw new Error('Could not find valid ATA address');
-  }
-  
-  // Use correct findProgramAddress algorithm
-  const message = Buffer.concat([
-    wallet,
-    tokenProgramId,
-    tokenMint,
-    Buffer.from('ProgramDerivedAddress'),
-    associatedTokenProgramId
-  ]);
-  
-  const hash = createHash('sha256');
-  hash.update(message);
-  address = hash.digest();
-  
-  // Actual Solana ATA calculation is more complex, using simplified method here
-  // In production, it's recommended to use @solana/spl-token library
-  
-  // Temporary solution: Use @solana/web3.js if available
   try {
-    // Try to use more accurate method (if possible)
+    // Try to use Solana libraries if available
     const { PublicKey } = await import('@solana/web3.js');
     const { getAssociatedTokenAddress } = await import('@solana/spl-token');
     
@@ -277,98 +249,134 @@ function addressToBytes32(address) {
     case 'ethereum':
       // Ethereum address 20 bytes -> 32 bytes (left padding with 0)
       const cleanAddr = address.toLowerCase().replace('0x', '');
-      return '0x' + '000000000000000000000000' + cleanAddr;
+      return `0x${'000000000000000000000000' + cleanAddr}`;
       
     case 'solana':
       // Solana address decoded from base58 to 32 bytes
       const decoded = base58Decode(address);
-      return '0x' + decoded.toString('hex').padStart(64, '0');
+      return `0x${decoded.toString('hex').padStart(64, '0')}`;
       
     case 'hex':
       // Already in hex format, ensure it's 32 bytes
-      return '0x' + address.replace('0x', '').padStart(64, '0');
+      return `0x${address.replace('0x', '').padStart(64, '0')}`;
       
     default:
       throw new Error(`Unsupported address format: ${address}. Expected Ethereum (0x...) or Solana (base58) address.`);
   }
 }
 
-// 🔧 Fixed serialization function - supports both modes
+// 🔧 Serialization using binary-layout (MODIFIED to support multiple instructions)
 function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MODE) {
-  console.log(`🔧 Serializing for destination chain: ${apiDstChain}`);
-  console.log(`🎯 Execution Mode: ${mode.toUpperCase()}`);
+  console.log(`🔧 Serializing relay instructions with binary-layout...`);
+  console.log(`   📍 Destination chain: ${apiDstChain}`);
+  console.log(`   🎯 Execution mode: ${mode.toUpperCase()}`);
+  
+  let instructions = [];
   
   if (mode === 'drop') {
-    // 🔄 Mode 1: GasDropOffInstruction - auto gas delivery to specified address
-    if (apiDstChain === 1) {
-      // Solana: Use GasDROPInstruction
-      const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
-      const recipientHex = addressToBytes32(recipient).replace('0x', '');
-      return '0x02' +                              // Type 2: GasDropOffInstruction
-             dropOffHex +                          // gasLimit: dynamically set CU (16 bytes)
-             recipientHex;                         // recipient: 32 bytes
-    } else {
-      // EVM chains: Use GasDropOffInstruction
-      console.log(`🔧 Using GasDropOffInstruction for EVM chain`);
-      
-      // Convert gas limit to 16-byte hex
-      const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0'); // 16 bytes
-      
-      // Ensure recipient is correct 32 bytes format
-      const recipientHex = addressToBytes32(recipient).replace('0x', '');
-      
-      const result = '0x02' + dropOffHex + recipientHex;
-      
-      console.log(`🔧 DropOff (16 bytes): ${dropOffHex} (${GAS_DROP_LIMIT} gas)`);
-      console.log(`🔧 Recipient (32 bytes): ${recipientHex}`);
-      console.log(`🔧 Final relayInstructions: ${result}`);
-      console.log(`🔧 Total length: ${result.length} chars (should be 130)`);
-      
-      return result;
-    }
-  } else {
-    // 🚀 Mode 2: GasInstruction - requires manual gas deposit
-    console.log(`🔧 Using GasInstruction mode (manual gas required)`);
+    // Mode 1: GasDropOffInstruction - auto gas delivery
+    console.log(`   📦 Using GasDropOffInstruction for ${apiDstChain === 1 ? 'Solana' : 'EVM'} chain`);
+    const recipientBytes32 = addressToBytes32(recipient);
     
-    let gasLimit;
+    // Use appropriate gas limit based on destination chain
+    const dropOffAmount = apiDstChain === 1 ? SOLANA_GAS_DROP : GAS_DROP_LIMIT;
+    
+    // 1. Add GasDropOffInstruction
+    instructions.push({
+      request: {
+        type: "GasDropOffInstruction",
+        dropOff: dropOffAmount,
+        recipient: recipientBytes32
+      }
+    });
+    
+    // 2. 🆕 For Solana, also add GasInstruction to set compute unit limit
     if (apiDstChain === 1) {
-      // Solana: Use higher compute units - 1,000,000 CU
-      gasLimit = SOLANA_GAS_LIMIT.toString(16).padStart(32, '0'); // dynamically set
-
-      const result = '0x01' +                        // Type 1: GasInstruction
-             gasLimit +                              // gasLimit: 16 bytes
-             '000000000000000000000000000f4240';    // manually set to 1,000,000 CU
-
-      console.log(`🔧 Solana gasLimit: ${SOLANA_GAS_LIMIT} CU`);
-      console.log(`🔧 EVM gasLimit: 200,000 gas`);
-      console.log(`🔧 GasLimit (16 bytes): ${gasLimit}`);
-      console.log(`🔧 MsgValue (16 bytes): 000000000000000000000000000f4240`);
-      console.log(`🔧 Final relayInstructions: ${result}`);
-      console.log(`🔧 Total length: ${result.length} chars (should be 66)`);
-      return  result;
+      console.log(`   🚀 Adding GasInstruction for Solana compute unit limit`);
+      instructions.push({
+        request: {
+          type: "GasInstruction",
+          gasLimit: SOLANA_GAS_LIMIT,  // 1.4M CU
+          msgValue: 5000000n  // No additional msg value needed
+        }
+      });
+    }else {
+      console.log(`  🚀 Adding GasInstruction for for EVM chain`);
+      instructions.push({
+        request: {
+          type: "GasInstruction",
+          gasLimit: 200000n,  // 200k gas
+          msgValue: 0n        // No msg value
+        }
+      });
+    }
+    
+    console.log(`   💸 Drop off amount: ${dropOffAmount} ${apiDstChain === 1 ? 'lamports' : 'gas'}`);
+    console.log(`   📍 Recipient: ${recipient}`);
+    if (apiDstChain === 1) {
+      console.log(`   💻 Compute Unit Limit: ${SOLANA_GAS_LIMIT} CU`);
+    }
+    
+  } else {
+    // Mode 2: GasInstruction - manual gas deposit required
+    console.log(`   🚀 Using GasInstruction (manual gas deposit required)`);
+    
+    if (apiDstChain === 1) {
+      // Solana: Higher compute units
+      instructions.push({
+        request: {
+          type: "GasInstruction",
+          gasLimit: SOLANA_GAS_LIMIT,
+          msgValue: 5000000n // 1M lamports
+        }
+      });
     } else {
-      // EVM limited: 200,000 gas 
-      gasLimit = '00000000000000000000000000030d40'; // 200,000 gas
-
-      const result = '0x01' +                        // Type 1: GasInstruction
-                     gasLimit +                      // gasLimit: 16 bytes
-                     '00000000000000000000000000000000'; // msgValue: 0 (16 bytes)
-      console.log(`🔧 EVM gasLimit: 200,000 gas`);
-      console.log(`🔧 GasLimit (16 bytes): ${gasLimit}`);
-      console.log(`🔧 MsgValue (16 bytes): 00000000000000000000000000000000`);
-      console.log(`🔧 Final relayInstructions: ${result}`);
-      console.log(`🔧 Total length: ${result.length} chars (should be 66)`);
-
-      return result;
+      // EVM chains: Standard gas limit
+      instructions.push({
+        request: {
+          type: "GasInstruction",
+          gasLimit: 200000n, // 200k gas
+          msgValue: 0n       // No msg value
+        }
+      });
     }
   }
+  
+  // Create the instructions array
+  const relayInstructions = {
+    requests: instructions  // Now supports multiple instructions
+  };
+  
+  // Serialize using binary-layout
+  const serialized = serialize(relayInstructionsLayout, relayInstructions);
+  const result = '0x' + Buffer.from(serialized).toString('hex');
+  
+  // Log details
+  console.log(`   📊 Total instructions: ${instructions.length}`);
+  instructions.forEach((inst, index) => {
+    const instructionType = inst.request.type;
+    console.log(`   📋 Instruction ${index + 1}:`);
+    console.log(`      - Type: ${instructionType}`);
+    if (instructionType === "GasInstruction") {
+      console.log(`      - Gas Limit: ${inst.request.gasLimit}`);
+      console.log(`      - Msg Value: ${inst.request.msgValue}`);
+    } else {
+      console.log(`      - Drop Off: ${inst.request.dropOff}`);
+      console.log(`      - Recipient: ${inst.request.recipient}`);
+    }
+  });
+  console.log(`   📝 Serialized: ${result}`);
+  console.log(`   📏 Length: ${result.length} chars`);
+  
+  return result;
 }
 
-function v3Path(a, b, fee) {
-  return solidityPacked(['address', 'uint24', 'address'], [a, fee, b]);
+// 🔧 V3 path builder for Uniswap
+function v3Path(tokenA, tokenB, fee) {
+  return solidityPacked(['address', 'uint24', 'address'], [tokenA, fee, tokenB]);
 }
 
-// 🔧 Fixed API call function
+// 🔧 Get quote from executor API
 async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
   const relayInstructions = serializeRelayInstructions(apiDstChain, recipient);
   
@@ -378,6 +386,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     relayInstructions
   };
   
+  console.log('\n📤 Requesting quote from executor...');
   console.log('🔍 API Request:', JSON.stringify(requestPayload, null, 2));
   
   try {
@@ -389,8 +398,8 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       }
     });
     
-    console.log('✅ API Response received');
-    console.log('📊 Estimated cost:', res.data.estimatedCost || 'N/A');
+    console.log('✅ Quote received successfully');
+    console.log(`📊 Estimated cost: ${res.data.estimatedCost || 'N/A'} wei`);
     
     return {
       signedQuote: res.data.signedQuote,
@@ -407,6 +416,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
   }
 }
 
+// Main execution
 (async () => {
   try {
     console.log('\n📋 ====== CONFIGURATION SUMMARY ======');
@@ -432,6 +442,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     
     // 🔧 Process recipient address
     let finalRecipient = RECIPIENT;
+    let gasRecipient = RECIPIENT;
     const addressType = detectAddressType(RECIPIENT);
     console.log(`🎯 Detected address type: ${addressType.toUpperCase()}`);
     
@@ -471,13 +482,15 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     console.log(`🏷️  Address Type: ${addressType.toUpperCase()}`);
     console.log(`📨 Recipient (bytes32): ${recipientBytes32}`);
     
+    // Parse token amounts
     for (const t of TOKENS) t.amtWei = parseUnits(t.amt, t.dec);
 
     // Permit2 setup
     console.log('\n🔐 ====== PERMIT2 SETUP ======');
     const permit2 = new Contract(PERMIT2, PERMIT2_ABI, wallet);
-    const expiration = Math.floor(Date.now() / 1e3) + 86400 * 30;
-    const sigDeadline = Math.floor(Date.now() / 1e3) + 3600;
+    const expiration = Math.floor(Date.now() / 1e3) + 86400 * 30; // 30 days
+    const sigDeadline = Math.floor(Date.now() / 1e3) + 3600; // 1 hour
+    
     const details = await Promise.all(TOKENS.map(async t => {
       const [, , nonce] = await permit2.allowance(wallet.address, t.addr, COLLECTOR);
       console.log(`🪙 Token: ${t.addr}, Amount: ${t.amt}, Nonce: ${nonce}`);
@@ -512,54 +525,63 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     const { signedQuote, relayInstructions, estimatedCost } = await getQuoteFromExecutor(
       API_SRC_CHAIN,
       API_DST_CHAIN,
-      finalRecipient  // Use final address (EOA or ATA)
+      gasRecipient  // use the EOA if gas drop is enabled
     );
 
     // Calculate fee with buffer
-    const buffer = estimatedCost > 0n ? estimatedCost / 1n : BigInt('10000000000000000000000');
+    const buffer = estimatedCost > 0n ? estimatedCost / 10n : BigInt('5000000000000000'); // 10% buffer or 0.001 ETH
     const actualMsgValue = estimatedCost + buffer;
     
     console.log(`📦 Estimated Cost: ${estimatedCost} wei`);
-    console.log(`💰 Using actual value with buffer: ${actualMsgValue} wei`);
+    console.log(`🔧 Buffer : ${buffer} wei`);
+    console.log(`💰 Total value to send: ${actualMsgValue} wei`);
 
     // Build transaction
     console.log('\n🔨 ====== BUILDING TRANSACTION ======');
     const abi = AbiCoder.defaultAbiCoder();
-    const commands = '0x' + '00'.repeat(TOKENS.length);
+    const commands = '0x' + '00'.repeat(TOKENS.length); // V3_SWAP_EXACT_IN command for each token
     const inputs = TOKENS.map(t =>
-      abi.encode(['address','uint256','uint256','bytes','bool'], [COLLECTOR, t.amtWei, 0, v3Path(t.addr, TARGET, t.fee), false])
+      abi.encode(
+        ['address','uint256','uint256','bytes','bool'], 
+        [COLLECTOR, t.amtWei, 0, v3Path(t.addr, TARGET, t.fee), false]
+      )
     );
 
     console.log(`📝 Commands: ${commands}`);
     console.log(`📋 Inputs count: ${inputs.length}`);
 
+    // Create contract instance
     const contract = new Contract(COLLECTOR, DUST_ABI, wallet);
     
+    // Prepare transaction parameters
+    const txParams = {
+      commands,
+      inputs,
+      deadline: Math.floor(Date.now() / 1e3) + 1800, // 30 minutes
+      targetToken: TARGET,
+      dstChain: DST_CHAIN_ID,
+      dstDomain: DST_DOMAIN,
+      recipient: recipientBytes32,  // Use converted bytes32 format
+      arbiterFee: 0,
+      destinationCaller: DESTINATION_CALLER,
+      maxFee: MAX_FEE,
+      minFinalityThreshold: MIN_FINALITY_THRESHOLD,
+      executorArgs: {
+        refundAddress: wallet.address,
+        signedQuote,
+        instructions: relayInstructions
+      },
+      feeArgs: {
+        dbps: FEE_DBPS,
+        payee: FEE_PAYEE
+      },
+      estimatedCost: actualMsgValue
+    };
+    
+    // Send transaction
     console.log('⏳ Sending main transaction...');
     const tx = await contract.batchCollectWithUniversalRouter(
-      {
-        commands,
-        inputs,
-        deadline: Math.floor(Date.now() / 1e3) + 1800,
-        targetToken: TARGET,
-        dstChain: DST_CHAIN_ID,
-        dstDomain: DST_DOMAIN,
-        recipient: recipientBytes32,  // 🔧 Use converted bytes32 format
-        arbiterFee: 0,
-        destinationCaller: DESTINATION_CALLER,
-        maxFee: MAX_FEE,
-        minFinalityThreshold: MIN_FINALITY_THRESHOLD,
-        executorArgs: {
-          refundAddress: wallet.address,
-          signedQuote,
-          instructions: relayInstructions
-        },
-        feeArgs: {
-          dbps: FEE_DBPS,
-          payee: FEE_PAYEE
-        },
-        estimatedCost: actualMsgValue  // 🎯 Pass actualMsgValue as estimatedCost parameter
-      },
+      txParams,
       TOKENS.map(t => t.addr),
       TOKENS.map(t => t.amtWei),
       {
@@ -570,18 +592,17 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     );
 
     console.log('\n🎯 ====== TRANSACTION RESULT ======');
-    console.log('📝 Tx sent:', tx.hash);
+    console.log('📝 Transaction hash:', tx.hash);
     console.log('⏳ Waiting for confirmation...');
     
-    const rc = await tx.wait();
-    console.log(rc.status === 1 ? '✅ Transaction Success!' : '❌ Transaction Failed!');
+    const receipt = await tx.wait();
+    console.log(receipt.status === 1 ? '✅ Transaction Success!' : '❌ Transaction Failed!');
     
-    if (rc.status === 1) {
+    if (receipt.status === 1) {
       console.log('\n🎉 ====== SUCCESS SUMMARY ======');
-      console.log(`✅ Transaction confirmed in block: ${rc.blockNumber}`);
-      console.log(`⛽ Gas used: ${rc.gasUsed}`);
+      console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
+      console.log(`⛽ Gas used: ${receipt.gasUsed}`);
       console.log(`💰 Total cost: ${actualMsgValue} wei`);
-      console.log(`💰 Estimated cost parameter: ${actualMsgValue} wei`);
       console.log(`📨 Target Address: ${finalRecipient}`);
       if (finalRecipient !== RECIPIENT) {
         console.log(`   (ATA calculated from EOA: ${RECIPIENT})`);
@@ -589,19 +610,19 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       
       if (EXECUTION_MODE === 'gas') {
         console.log('\n📋 NEXT STEPS (GAS Mode):');
-        console.log('🏷️  Your funds are being transferred cross-chain');
-        console.log('⏰ You will need to manually deposit gas on the destination chain');
-        console.log('🔍 Check the executor status for completion');
+        console.log('1️⃣  Your tokens are being transferred cross-chain');
+        console.log('2️⃣  You need to manually deposit gas on the destination chain');
+        console.log('3️⃣  Monitor the transfer status using the link below');
       } else {
         console.log('\n📋 NEXT STEPS (DROP Mode):');
-        console.log('📦 Tokens should automatically arrive at your recipient address');
+        console.log('1️⃣  Tokens will automatically arrive at your recipient address');
         if (API_DST_CHAIN === 1 && USE_ATA_FOR_SOLANA && finalRecipient !== RECIPIENT) {
-          console.log('💳 Tokens will be in the ATA account');
+          console.log('2️⃣  Tokens will be in the Associated Token Account (ATA)');
         }
-        console.log('🔍 Check your destination chain balance');
+        console.log('3️⃣  Check your destination chain balance in a few minutes');
       }
       
-      console.log(`🌐 Track progress: ${EXECUTOR_API}/status/${tx.hash}`);
+      console.log(`\n🌐 Track your transfer: ${EXECUTOR_API}/status/${tx.hash}`);
     }
     
   } catch (error) {
@@ -609,7 +630,8 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     console.error(`❌ Error: ${error.message}`);
     
     if (error.response?.data) {
-      console.error(`🌐 API Error: ${JSON.stringify(error.response.data, null, 2)}`);
+      console.error(`🌐 API Error Details:`);
+      console.error(JSON.stringify(error.response.data, null, 2));
     }
     
     if (error.code) {
@@ -637,6 +659,8 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       console.error('   - Or set USE_ATA_FOR_SOLANA=false to use EOA directly');
       console.error('   - Install @solana/web3.js and @solana/spl-token for ATA support');
     }
+    console.error('10. Ensure binary-layout is installed:');
+    console.error('    npm install binary-layout');
     
     process.exit(1);
   }
