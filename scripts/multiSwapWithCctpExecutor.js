@@ -301,7 +301,7 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
   if (mode === 'drop') {
     // 🔄 Mode 1: GasDropOffInstruction - auto gas delivery to specified address
     if (apiDstChain === 1) {
-      // Solana: Use GasInstruction (Solana doesn't support dropOff)
+      // Solana: Use GasDROPInstruction
       const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
       const recipientHex = addressToBytes32(recipient).replace('0x', '');
       return '0x02' +                              // Type 2: GasDropOffInstruction
