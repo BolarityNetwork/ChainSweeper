@@ -35,20 +35,20 @@ const MIN_FINALITY_THRESHOLD = parseInt(process.env.MIN_FINALITY_THRESHOLD || '0
 const FEE_DBPS = parseInt(process.env.FEE_DBPS || '0');
 const FEE_PAYEE = process.env.FEE_PAYEE || ZeroHash;
 
-// 🆕 Solana ATA 相关配置
-const SOLANA_TOKEN_MINT = process.env.SOLANA_TOKEN_MINT || ''; // Solana上的token mint地址
-const USE_ATA_FOR_SOLANA = process.env.USE_ATA_FOR_SOLANA !== 'false'; // 默认启用ATA
+// 🆕 Solana ATA related configuration
+const SOLANA_TOKEN_MINT = process.env.SOLANA_TOKEN_MINT || ''; // Token mint address on Solana
+const USE_ATA_FOR_SOLANA = process.env.USE_ATA_FOR_SOLANA !== 'false'; // Enable ATA by default
 
-// Solana 程序 ID（固定值）
+// Solana Program IDs (fixed values)
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 
-// 🆕 模式选择配置
-const EXECUTION_MODE = process.env.EXECUTION_MODE || 'gas'; // 'gas' 或 'drop'
-const GAS_DROP_LIMIT = BigInt(process.env.GAS_DROP_LIMIT || '500000'); // gas drop 模式的 gas limit
-const SOLANA_GAS_LIMIT = BigInt(process.env.SOLANA_GAS_LIMIT || '1400000'); // Solana 专用 gas limit (CU)
+// 🆕 Execution mode configuration
+const EXECUTION_MODE = process.env.EXECUTION_MODE || 'gas'; // 'gas' or 'drop'
+const GAS_DROP_LIMIT = BigInt(process.env.GAS_DROP_LIMIT || '500000'); // gas limit for drop mode
+const SOLANA_GAS_LIMIT = BigInt(process.env.SOLANA_GAS_LIMIT || '1400000'); // Solana specific gas limit (CU)
 
-// 显示执行模式信息
+// Display execution mode info
 console.log(`🎯 Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
 console.log(EXECUTION_MODE === 'drop' 
   ? "   📦 Auto-delivery to recipient address" 
@@ -106,7 +106,7 @@ const PERMIT2_ABI = [
   'function allowance(address user, address token, address spender) external view returns (uint160,uint48,uint48)'
 ];
 
-// 🔧 Base58 编码/解码函数
+// 🔧 Base58 encode/decode functions
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 function base58Decode(str) {
@@ -123,7 +123,7 @@ function base58Decode(str) {
   }
   for (let i = 0; i < str.length && str[i] === '1'; i++) bytes.unshift(0);
   
-  // 返回 Buffer 而不是 hex string，方便后续处理
+  // Return Buffer instead of hex string for further processing
   return Buffer.from(bytes);
 }
 
@@ -140,7 +140,7 @@ function base58Encode(buffer) {
     encoded = BASE58_ALPHABET[Number(remainder)] + encoded;
   }
   
-  // 处理前导零
+  // Handle leading zeros
   for (const byte of buffer) {
     if (byte !== 0) break;
     encoded = '1' + encoded;
@@ -149,26 +149,26 @@ function base58Encode(buffer) {
   return encoded;
 }
 
-// 🆕 计算 Solana ATA 地址的函数
+// 🆕 Calculate Solana ATA address function
 async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
   console.log('🔐 Calculating ATA address...');
   console.log(`   👛 Wallet: ${walletAddress}`);
   console.log(`   🪙 Token Mint: ${tokenMintAddress}`);
   
-  // 解码地址
+  // Decode addresses
   const wallet = base58Decode(walletAddress);
   const tokenMint = base58Decode(tokenMintAddress);
   const tokenProgramId = base58Decode(TOKEN_PROGRAM_ID);
   const associatedTokenProgramId = base58Decode(ASSOCIATED_TOKEN_PROGRAM_ID);
   
-  // 构建种子
+  // Build seeds
   const seeds = [
     wallet,
     tokenProgramId,
     tokenMint
   ];
   
-  // 查找 PDA
+  // Find PDA
   let nonce = 255;
   let address;
   
@@ -184,11 +184,11 @@ async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
       hash.update(Buffer.concat(seedsWithNonce));
       const hashResult = hash.digest();
       
-      // 检查是否在 ed25519 曲线上
-      // 这是一个简化的检查，实际的 PDA 验证更复杂
-      // 通常 nonce = 255 就能找到
+      // Check if on ed25519 curve
+      // This is a simplified check, actual PDA validation is more complex
+      // Usually nonce = 255 works
       if (nonce === 255) {
-        // ATA 通常使用 nonce 255
+        // ATA typically uses nonce 255
         const message = Buffer.concat([
           ...seeds,
           Buffer.from('ProgramDerivedAddress'),
@@ -212,7 +212,7 @@ async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
     throw new Error('Could not find valid ATA address');
   }
   
-  // 使用正确的 findProgramAddress 算法
+  // Use correct findProgramAddress algorithm
   const message = Buffer.concat([
     wallet,
     tokenProgramId,
@@ -225,11 +225,12 @@ async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
   hash.update(message);
   address = hash.digest();
   
-
+  // Actual Solana ATA calculation is more complex, using simplified method here
+  // In production, it's recommended to use @solana/spl-token library
   
-  // 临时解决方案：如果有 @solana/web3.js 可用，使用它
+  // Temporary solution: Use @solana/web3.js if available
   try {
-    // 尝试使用更准确的方法（如果可能）
+    // Try to use more accurate method (if possible)
     const { PublicKey } = await import('@solana/web3.js');
     const { getAssociatedTokenAddress } = await import('@solana/spl-token');
     
@@ -240,27 +241,27 @@ async function findAssociatedTokenAddress(walletAddress, tokenMintAddress) {
     console.log(`   ✅ ATA Address: ${ata.toBase58()}`);
     return ata.toBase58();
   } catch (e) {
-    // 如果没有安装 Solana 库，提供一个提示
+    // If Solana libraries not installed, provide a hint
     console.warn('   ⚠️  @solana/web3.js not found. For accurate ATA calculation, please install:');
     console.warn('   npm install @solana/web3.js @solana/spl-token');
     throw new Error('Cannot calculate ATA without Solana libraries. Please install @solana/web3.js and @solana/spl-token');
   }
 }
 
-// 🔧 智能检测地址类型
+// 🔧 Smart address type detection
 function detectAddressType(address) {
-  // 检测以太坊地址 (0x开头，42字符)
+  // Detect Ethereum address (starts with 0x, 42 characters)
   if (isAddress(address)) {
     return 'ethereum';
   }
   
-  // 检测 Solana 地址 (base58格式，32-44字符，不包含0、O、I、l)
+  // Detect Solana address (base58 format, 32-44 characters, excludes 0, O, I, l)
   const solanaPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
   if (solanaPattern.test(address)) {
     return 'solana';
   }
   
-  // 检测 hex 格式
+  // Detect hex format
   if (address.startsWith('0x') && address.length === 66) {
     return 'hex';
   }
@@ -268,23 +269,23 @@ function detectAddressType(address) {
   return 'unknown';
 }
 
-// 🔧 将地址转换为 bytes32 格式
+// 🔧 Convert address to bytes32 format
 function addressToBytes32(address) {
   const addressType = detectAddressType(address);
   
   switch (addressType) {
     case 'ethereum':
-      // 以太坊地址 20 bytes -> 32 bytes (左填充 0)
+      // Ethereum address 20 bytes -> 32 bytes (left padding with 0)
       const cleanAddr = address.toLowerCase().replace('0x', '');
       return '0x' + '000000000000000000000000' + cleanAddr;
       
     case 'solana':
-      // Solana 地址通过 base58 解码得到 32 bytes
+      // Solana address decoded from base58 to 32 bytes
       const decoded = base58Decode(address);
       return '0x' + decoded.toString('hex').padStart(64, '0');
       
     case 'hex':
-      // 已经是 hex 格式，确保是 32 bytes
+      // Already in hex format, ensure it's 32 bytes
       return '0x' + address.replace('0x', '').padStart(64, '0');
       
     default:
@@ -292,28 +293,28 @@ function addressToBytes32(address) {
   }
 }
 
-// 🔧 修正的序列化函数 - 支持两种模式
+// 🔧 Fixed serialization function - supports both modes
 function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MODE) {
   console.log(`🔧 Serializing for destination chain: ${apiDstChain}`);
   console.log(`🎯 Execution Mode: ${mode.toUpperCase()}`);
   
   if (mode === 'drop') {
-    // 🔄 模式1: GasDropOffInstruction - 自动gas发送到指定地址
+    // 🔄 Mode 1: GasDropOffInstruction - auto gas delivery to specified address
     if (apiDstChain === 1) {
-      // Solana: 使用 GasInstruction（Solana 不支持 dropOff）
+      // Solana: Use GasInstruction (Solana doesn't support dropOff)
       const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0');
       const recipientHex = addressToBytes32(recipient).replace('0x', '');
-      return '0x02' +                              // Type 1: GasDropOffInstruction
-             dropOffHex +                        // gasLimit: 动态设置的 CU (16 bytes)
-             recipientHex;   // msgValue: 0 (16 bytes)
+      return '0x02' +                              // Type 2: GasDropOffInstruction
+             dropOffHex +                          // gasLimit: dynamically set CU (16 bytes)
+             recipientHex;                         // recipient: 32 bytes
     } else {
-      // EVM 链: 使用 GasDropOffInstruction
+      // EVM chains: Use GasDropOffInstruction
       console.log(`🔧 Using GasDropOffInstruction for EVM chain`);
       
-      // 将 gas limit 转换为16字节的十六进制
+      // Convert gas limit to 16-byte hex
       const dropOffHex = GAS_DROP_LIMIT.toString(16).padStart(32, '0'); // 16 bytes
       
-      // 确保 recipient 是正确的 32 bytes 格式
+      // Ensure recipient is correct 32 bytes format
       const recipientHex = addressToBytes32(recipient).replace('0x', '');
       
       const result = '0x02' + dropOffHex + recipientHex;
@@ -326,17 +327,17 @@ function serializeRelayInstructions(apiDstChain, recipient, mode = EXECUTION_MOD
       return result;
     }
   } else {
-    // 🚀 模式2: GasInstruction - 需要手动deposit gas
+    // 🚀 Mode 2: GasInstruction - requires manual gas deposit
     console.log(`🔧 Using GasInstruction mode (manual gas required)`);
     
     let gasLimit;
     if (apiDstChain === 1) {
-      // Solana: 使用更高的计算单位 - 1,000,000 CU
-      gasLimit = SOLANA_GAS_LIMIT.toString(16).padStart(32, '0'); // 动态设置
+      // Solana: Use higher compute units - 1,000,000 CU
+      gasLimit = SOLANA_GAS_LIMIT.toString(16).padStart(32, '0'); // dynamically set
 
       const result = '0x01' +                        // Type 1: GasInstruction
              gasLimit +                              // gasLimit: 16 bytes
-             '000000000000000000000000000f4240';    //manually set to 1,000,000 CU
+             '000000000000000000000000000f4240';    // manually set to 1,000,000 CU
 
       console.log(`🔧 Solana gasLimit: ${SOLANA_GAS_LIMIT} CU`);
       console.log(`🔧 EVM gasLimit: 200,000 gas`);
@@ -367,7 +368,7 @@ function v3Path(a, b, fee) {
   return solidityPacked(['address', 'uint24', 'address'], [a, fee, b]);
 }
 
-// 🔧 修正的 API 调用函数
+// 🔧 Fixed API call function
 async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
   const relayInstructions = serializeRelayInstructions(apiDstChain, recipient);
   
@@ -429,12 +430,12 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     const wallet = new Wallet(PRIVKEY, provider);
     const chainId = (await provider.getNetwork()).chainId;
     
-    // 🔧 处理接收地址
+    // 🔧 Process recipient address
     let finalRecipient = RECIPIENT;
     const addressType = detectAddressType(RECIPIENT);
     console.log(`🎯 Detected address type: ${addressType.toUpperCase()}`);
     
-    // 🆕 如果目标是 Solana 且启用了 ATA，计算 ATA 地址
+    // 🆕 If target is Solana and ATA is enabled, calculate ATA address
     if (API_DST_CHAIN === 1 && addressType === 'solana' && USE_ATA_FOR_SOLANA && SOLANA_TOKEN_MINT) {
       try {
         console.log('\n💳 ====== CALCULATING ATA ADDRESS ======');
@@ -444,7 +445,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
       } catch (error) {
         console.error(`⚠️  Failed to calculate ATA: ${error.message}`);
         console.error('   Falling back to EOA address...');
-        // 继续使用原始地址
+        // Continue with original address
       }
     }
     
@@ -452,7 +453,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     try {
       recipientBytes32 = addressToBytes32(finalRecipient);
       
-      // 验证地址类型与目标链的兼容性
+      // Validate address type compatibility with target chain
       if (API_DST_CHAIN === 1 && addressType !== 'solana') {
         console.warn(`⚠️  Warning: Target is Solana (chain ${API_DST_CHAIN}) but address looks like ${addressType}. This might cause issues.`);
       } else if (API_DST_CHAIN !== 1 && addressType === 'solana') {
@@ -506,12 +507,12 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     await permit2.permit(wallet.address, permitBatch, signature, { nonce });
     console.log('✅ Permit2 transaction completed');
 
-    // 🔧 获取 quote - 使用最终地址（可能是ATA）
+    // 🔧 Get quote - use final address (might be ATA)
     console.log('\n💰 ====== GETTING QUOTE FROM EXECUTOR ======');
     const { signedQuote, relayInstructions, estimatedCost } = await getQuoteFromExecutor(
       API_SRC_CHAIN,
       API_DST_CHAIN,
-      finalRecipient  // 使用最终地址（EOA或ATA）
+      finalRecipient  // Use final address (EOA or ATA)
     );
 
     // Calculate fee with buffer
@@ -543,7 +544,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
         targetToken: TARGET,
         dstChain: DST_CHAIN_ID,
         dstDomain: DST_DOMAIN,
-        recipient: recipientBytes32,  // 🔧 使用转换后的 bytes32 格式
+        recipient: recipientBytes32,  // 🔧 Use converted bytes32 format
         arbiterFee: 0,
         destinationCaller: DESTINATION_CALLER,
         maxFee: MAX_FEE,
@@ -557,7 +558,7 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
           dbps: FEE_DBPS,
           payee: FEE_PAYEE
         },
-        estimatedCost: actualMsgValue  // 🎯 新增：将 actualMsgValue 作为 estimatedCost 参数传递
+        estimatedCost: actualMsgValue  // 🎯 Pass actualMsgValue as estimatedCost parameter
       },
       TOKENS.map(t => t.addr),
       TOKENS.map(t => t.amtWei),
