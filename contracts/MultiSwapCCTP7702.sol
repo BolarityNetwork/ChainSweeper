@@ -24,6 +24,11 @@ interface ICCTPv2WithExecutor {
     ) external payable;
 }
 
+interface IFeeConfig {
+    function feeCollector() external view returns (address);
+    function feeBps() external view returns (uint256);
+}
+
 struct ExecutorArgs {
     address refundAddress;
     bytes signedQuote;
@@ -40,8 +45,7 @@ contract DustCollector7702 is Ownable {
 
     IUniversalRouter public immutable router;
     ICCTPv2WithExecutor public immutable cctp;
-    address public feeCollector;
-    uint256 public feeBps = 30;
+    IFeeConfig public immutable feeConfig;
 
     struct SwapParams {
         bytes commands;
@@ -64,17 +68,15 @@ contract DustCollector7702 is Ownable {
     event Swapped(address indexed user, address indexed token, uint256 amount);
     event Bridged(address indexed user, address indexed token, uint256 amount, uint16 dstChain, bytes32 recipient);
 
-    constructor(address _router, address _cctp, address _feeCollector) Ownable(msg.sender) {
-        require(_router != address(0) && _cctp != address(0) && _feeCollector != address(0), "zero addr");
+    constructor(
+        address _router,
+        address _cctp,
+        address _feeConfig
+    ) Ownable(msg.sender) {
+        require(_router != address(0) && _cctp != address(0) && _feeConfig != address(0), "zero addr");
         router = IUniversalRouter(_router);
         cctp = ICCTPv2WithExecutor(_cctp);
-        feeCollector = _feeCollector;
-    }
-
-    function setFee(uint256 _bps, address _collector) external onlyOwner {
-        require(_bps <= 1000, "too high");
-        feeBps = _bps;
-        feeCollector = _collector;
+        feeConfig = IFeeConfig(_feeConfig);
     }
 
     /// @notice 主逻辑入口，仅限 EIP-7702 升级账户调用自身合约
@@ -112,16 +114,18 @@ contract DustCollector7702 is Ownable {
     }
 
     function _handleResult(SwapParams calldata p, uint256 received) internal {
+        uint256 feeBps = feeConfig.feeBps();
+        address collector = feeConfig.feeCollector();
+
         uint256 feeAmt = (received * feeBps) / 10_000;
         uint256 userAmt = received - feeAmt;
 
-        if (feeAmt > 0) {
-            IERC20(p.targetToken).safeTransfer(feeCollector, feeAmt);
+        if (feeAmt > 0 && collector != address(0)) {
+            IERC20(p.targetToken).safeTransfer(collector, feeAmt);
             emit FeeCollected(p.targetToken, feeAmt);
         }
 
         if (p.dstChain == 0 && p.recipient == bytes32(0)) {
-            // keep in self
             emit Swapped(address(this), p.targetToken, userAmt);
         } else {
             _bridgeWithCCTP(p, userAmt);
@@ -145,9 +149,15 @@ contract DustCollector7702 is Ownable {
             p.feeArgs
         );
 
-        token.approve(address(cctp), 0); // 清除授权，防止残留
+        token.approve(address(cctp), 0);
         emit Bridged(address(this), p.targetToken, amount, p.dstChain, p.recipient);
     }
 
     receive() external payable {}
+
+    /// @notice 查询当前手续费配置（从 feeConfig 合约读取）
+    function getCurrentFeeConfig() external view returns (uint256 bps, address collector) {
+        bps = feeConfig.feeBps();
+        collector = feeConfig.feeCollector();
+    }
 }
