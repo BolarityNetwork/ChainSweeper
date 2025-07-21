@@ -1,0 +1,10 @@
+{
+  "base": {
+    "wormhole_7702_collector": "0x3eC9324B0b21425f436e315F593E161568E6016f",
+    "cctp_7702_collector": "0x03CFfEf7306de020487858b3B78852909AC7beCE",
+    "cctp_main_collector": {
+      "type": "config",
+      "address": "0xB19BDf8e367D609b65E76E6ADe4C67BC484F0ce5"
+    }
+  }
+}
