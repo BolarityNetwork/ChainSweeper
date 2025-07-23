@@ -123,10 +123,13 @@ contract DustCollectorUniversalPermit2 is Ownable {
             emit FeeCollected(p.targetToken, feeAmt);
         }
 
-        if (p.dstChain == 0 && p.recipient == bytes32(0)) {
-            IERC20(p.targetToken).safeTransfer(msg.sender, userAmt);
+        if (p.dstChain == 0) {
+            // 本地操作
+            address localRecipient = (p.recipient == bytes32(0)) ? msg.sender : address(uint160(uint256(p.recipient)));
+            IERC20(p.targetToken).safeTransfer(localRecipient, userAmt);
             emit Swapped(msg.sender, p.targetToken, userAmt);
         } else {
+            // 跨链操作
             _bridgeWithCCTP(p, userAmt);
         }
     }

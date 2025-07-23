@@ -50,18 +50,25 @@ const GAS_DROP_LIMIT = BigInt(process.env.GAS_DROP_LIMIT || '500000'); // gas li
 const SOLANA_GAS_LIMIT = BigInt(process.env.SOLANA_GAS_LIMIT || '1400000'); // Solana specific gas limit (CU)
 const SOLANA_GAS_DROP = BigInt(process.env.SOLANA_GAS_DROP || '500000');
 
-// Display execution mode info
-console.log(`🎯 Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
-console.log(EXECUTION_MODE === 'drop' 
-  ? "   📦 Auto-delivery to recipient address" 
-  : "   🏷️  Manual claim required on destination chain");
-if (EXECUTION_MODE === 'drop') {
-  console.log(`   ⛽ Gas Drop Limit: ${GAS_DROP_LIMIT} gas`);
-}
-if (API_DST_CHAIN === 1) {
-  console.log(`   🔥 Solana Gas Limit: ${SOLANA_GAS_LIMIT} CU`);
-  if (USE_ATA_FOR_SOLANA && SOLANA_TOKEN_MINT) {
-    console.log(`   💳 Will calculate ATA for token mint: ${SOLANA_TOKEN_MINT}`);
+// 🔧 Check if this is a local operation
+const IS_LOCAL_OPERATION = DST_CHAIN_ID === 0;
+
+if (IS_LOCAL_OPERATION) {
+  console.log("🏠 LOCAL OPERATION MODE - Skipping cross-chain logic");
+} else {
+  // Display execution mode info only for cross-chain operations
+  console.log(`🎯 Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
+  console.log(EXECUTION_MODE === 'drop' 
+    ? "   📦 Auto-delivery to recipient address" 
+    : "   🏷️  Manual claim required on destination chain");
+  if (EXECUTION_MODE === 'drop') {
+    console.log(`   ⛽ Gas Drop Limit: ${GAS_DROP_LIMIT} gas`);
+  }
+  if (API_DST_CHAIN === 1) {
+    console.log(`   🔥 Solana Gas Limit: ${SOLANA_GAS_LIMIT} CU`);
+    if (USE_ATA_FOR_SOLANA && SOLANA_TOKEN_MINT) {
+      console.log(`   💳 Will calculate ATA for token mint: ${SOLANA_TOKEN_MINT}`);
+    }
   }
 }
 
@@ -71,12 +78,6 @@ const TOKENS = [
     dec: parseInt(process.env.TOKEN1_DEC || '18'),
     amt: process.env.TOKEN1_AMT || '0.00001',
     fee: parseInt(process.env.TOKEN1_FEE || '3000')
-  },
-  {
-    addr: requireEnv('TOKEN2'),
-    dec: parseInt(process.env.TOKEN2_DEC || '18'),
-    amt: process.env.TOKEN2_AMT || '0.00001',
-    fee: parseInt(process.env.TOKEN2_FEE || '3000')
   }
 ];
 
@@ -422,16 +423,20 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     console.log('\n📋 ====== CONFIGURATION SUMMARY ======');
     console.log(`🌐 Source Chain (API): ${API_SRC_CHAIN}`);
     console.log(`🎯 Destination Chain (API): ${API_DST_CHAIN}`);
+    console.log(`🏠 Local Operation: ${IS_LOCAL_OPERATION ? 'YES' : 'NO'}`);
     console.log(`📨 Recipient (Original): ${RECIPIENT}`);
-    console.log(`🎛️  Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
-    if (EXECUTION_MODE === 'drop') {
-      console.log(`⛽ Gas Drop Limit: ${GAS_DROP_LIMIT}`);
-    }
-    if (API_DST_CHAIN === 1) {
-      console.log(`🔥 Solana Gas Limit: ${SOLANA_GAS_LIMIT} CU`);
-      console.log(`💳 Use ATA: ${USE_ATA_FOR_SOLANA}`);
-      if (SOLANA_TOKEN_MINT) {
-        console.log(`🪙 Token Mint: ${SOLANA_TOKEN_MINT}`);
+    
+    if (!IS_LOCAL_OPERATION) {
+      console.log(`🎛️  Execution Mode: ${EXECUTION_MODE.toUpperCase()}`);
+      if (EXECUTION_MODE === 'drop') {
+        console.log(`⛽ Gas Drop Limit: ${GAS_DROP_LIMIT}`);
+      }
+      if (API_DST_CHAIN === 1) {
+        console.log(`🔥 Solana Gas Limit: ${SOLANA_GAS_LIMIT} CU`);
+        console.log(`💳 Use ATA: ${USE_ATA_FOR_SOLANA}`);
+        if (SOLANA_TOKEN_MINT) {
+          console.log(`🪙 Token Mint: ${SOLANA_TOKEN_MINT}`);
+        }
       }
     }
     console.log('=====================================\n');
@@ -443,43 +448,57 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     // 🔧 Process recipient address
     let finalRecipient = RECIPIENT;
     let gasRecipient = RECIPIENT;
-    const addressType = detectAddressType(RECIPIENT);
-    console.log(`🎯 Detected address type: ${addressType.toUpperCase()}`);
-    
-    // 🆕 If target is Solana and ATA is enabled, calculate ATA address
-    if (API_DST_CHAIN === 1 && addressType === 'solana' && USE_ATA_FOR_SOLANA && SOLANA_TOKEN_MINT) {
-      try {
-        console.log('\n💳 ====== CALCULATING ATA ADDRESS ======');
-        finalRecipient = await findAssociatedTokenAddress(RECIPIENT, SOLANA_TOKEN_MINT);
-        console.log(`✅ Using ATA address: ${finalRecipient}`);
-        console.log('=====================================\n');
-      } catch (error) {
-        console.error(`⚠️  Failed to calculate ATA: ${error.message}`);
-        console.error('   Falling back to EOA address...');
-        // Continue with original address
-      }
-    }
-    
     let recipientBytes32;
-    try {
-      recipientBytes32 = addressToBytes32(finalRecipient);
+    
+    if (IS_LOCAL_OPERATION) {
+      // For local operations, we can use simpler logic
+      console.log('🏠 Processing recipient for local operation...');
+      if (isAddress(RECIPIENT)) {
+        recipientBytes32 = addressToBytes32(RECIPIENT);
+        console.log(`📨 Local recipient (bytes32): ${recipientBytes32}`);
+      } else {
+        // If recipient is not a valid address, use zero (will default to msg.sender)
+        recipientBytes32 = ZeroHash;
+        console.log(`📨 Using zero address (will default to msg.sender)`);
+      }
+    } else {
+      // Cross-chain logic (existing code)
+      const addressType = detectAddressType(RECIPIENT);
+      console.log(`🎯 Detected address type: ${addressType.toUpperCase()}`);
       
-      // Validate address type compatibility with target chain
-      if (API_DST_CHAIN === 1 && addressType !== 'solana') {
-        console.warn(`⚠️  Warning: Target is Solana (chain ${API_DST_CHAIN}) but address looks like ${addressType}. This might cause issues.`);
-      } else if (API_DST_CHAIN !== 1 && addressType === 'solana') {
-        console.warn(`⚠️  Warning: Target is EVM chain (${API_DST_CHAIN}) but address looks like Solana. This might cause issues.`);
+      // 🆕 If target is Solana and ATA is enabled, calculate ATA address
+      if (API_DST_CHAIN === 1 && addressType === 'solana' && USE_ATA_FOR_SOLANA && SOLANA_TOKEN_MINT) {
+        try {
+          console.log('\n💳 ====== CALCULATING ATA ADDRESS ======');
+          finalRecipient = await findAssociatedTokenAddress(RECIPIENT, SOLANA_TOKEN_MINT);
+          console.log(`✅ Using ATA address: ${finalRecipient}`);
+          console.log('=====================================\n');
+        } catch (error) {
+          console.error(`⚠️  Failed to calculate ATA: ${error.message}`);
+          console.error('   Falling back to EOA address...');
+          // Continue with original address
+        }
       }
       
-    } catch (error) {
-      throw new Error(`Failed to process recipient address: ${error.message}`);
+      try {
+        recipientBytes32 = addressToBytes32(finalRecipient);
+        
+        // Validate address type compatibility with target chain
+        if (API_DST_CHAIN === 1 && addressType !== 'solana') {
+          console.warn(`⚠️  Warning: Target is Solana (chain ${API_DST_CHAIN}) but address looks like ${addressType}. This might cause issues.`);
+        } else if (API_DST_CHAIN !== 1 && addressType === 'solana') {
+          console.warn(`⚠️  Warning: Target is EVM chain (${API_DST_CHAIN}) but address looks like Solana. This might cause issues.`);
+        }
+        
+      } catch (error) {
+        throw new Error(`Failed to process recipient address: ${error.message}`);
+      }
     }
     
     console.log(`👛 Wallet: ${wallet.address}`);
     console.log(`🌐 Chain ID: ${chainId}`);
     console.log(`📨 Original Recipient: ${RECIPIENT}`);
     console.log(`📨 Final Recipient: ${finalRecipient}`);
-    console.log(`🏷️  Address Type: ${addressType.toUpperCase()}`);
     console.log(`📨 Recipient (bytes32): ${recipientBytes32}`);
     
     // Parse token amounts
@@ -520,21 +539,42 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     await permit2.permit(wallet.address, permitBatch, signature, { nonce });
     console.log('✅ Permit2 transaction completed');
 
-    // 🔧 Get quote - use final address (might be ATA)
-    console.log('\n💰 ====== GETTING QUOTE FROM EXECUTOR ======');
-    const { signedQuote, relayInstructions, estimatedCost } = await getQuoteFromExecutor(
-      API_SRC_CHAIN,
-      API_DST_CHAIN,
-      gasRecipient  // use the EOA if gas drop is enabled
-    );
+    // 🔧 Get quote - skip for local operations
+    let signedQuote = '0x';
+    let relayInstructions = '0x';
+    let estimatedCost = 0n;
+    let actualMsgValue = 0n;
 
-    // Calculate fee with buffer
-    const buffer = estimatedCost > 0n ? estimatedCost / 10n : BigInt('5000000000000000'); // 10% buffer or 0.001 ETH
-    const actualMsgValue = estimatedCost + buffer;
-    
-    console.log(`📦 Estimated Cost: ${estimatedCost} wei`);
-    console.log(`🔧 Buffer : ${buffer} wei`);
-    console.log(`💰 Total value to send: ${actualMsgValue} wei`);
+    if (IS_LOCAL_OPERATION) {
+      console.log('\n🏠 ====== SKIPPING EXECUTOR QUOTE (LOCAL OPERATION) ======');
+      console.log('💰 No cross-chain fees required for local operation');
+      
+      // Set default values for local operation
+      signedQuote = '0x';
+      relayInstructions = '0x';
+      estimatedCost = 0n;
+      actualMsgValue = 0n;
+      
+    } else {
+      console.log('\n💰 ====== GETTING QUOTE FROM EXECUTOR ======');
+      const quoteResult = await getQuoteFromExecutor(
+        API_SRC_CHAIN,
+        API_DST_CHAIN,
+        gasRecipient  // use the EOA if gas drop is enabled
+      );
+      
+      signedQuote = quoteResult.signedQuote;
+      relayInstructions = quoteResult.relayInstructions;
+      estimatedCost = quoteResult.estimatedCost;
+
+      // Calculate fee with buffer
+      const buffer = estimatedCost > 0n ? estimatedCost / 10n : BigInt('5000000000000000'); // 10% buffer or 0.001 ETH
+      actualMsgValue = estimatedCost + buffer;
+      
+      console.log(`📦 Estimated Cost: ${estimatedCost} wei`);
+      console.log(`🔧 Buffer : ${buffer} wei`);
+      console.log(`💰 Total value to send: ${actualMsgValue} wei`);
+    }
 
     // Build transaction
     console.log('\n🔨 ====== BUILDING TRANSACTION ======');
@@ -608,7 +648,12 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
         console.log(`   (ATA calculated from EOA: ${RECIPIENT})`);
       }
       
-      if (EXECUTION_MODE === 'gas') {
+      if (IS_LOCAL_OPERATION) {
+        console.log('\n📋 LOCAL OPERATION COMPLETED:');
+        console.log('1️⃣  Your tokens have been swapped locally');
+        console.log('2️⃣  Tokens should now be in your wallet or specified recipient address');
+        console.log('3️⃣  No cross-chain transfer was needed');
+      } else if (EXECUTION_MODE === 'gas') {
         console.log('\n📋 NEXT STEPS (GAS Mode):');
         console.log('1️⃣  Your tokens are being transferred cross-chain');
         console.log('2️⃣  You need to manually deposit gas on the destination chain');
@@ -622,7 +667,9 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
         console.log('3️⃣  Check your destination chain balance in a few minutes');
       }
       
-      console.log(`\n🌐 Track your transfer: ${EXECUTOR_API}/status/${tx.hash}`);
+      if (!IS_LOCAL_OPERATION) {
+        console.log(`\n🌐 Track your transfer: ${EXECUTOR_API}/status/${tx.hash}`);
+      }
     }
     
   } catch (error) {
@@ -641,26 +688,31 @@ async function getQuoteFromExecutor(apiSrcChain, apiDstChain, recipient) {
     console.error('\n💡 TROUBLESHOOTING TIPS:');
     console.error('1. Check your .env configuration');
     console.error('2. Verify wallet has sufficient balance');
-    console.error('3. Try switching execution mode (gas/drop)');
-    if (EXECUTION_MODE === 'drop') {
-      console.error('4. Try increasing GAS_DROP_LIMIT');
-      console.error('5. Or switch to gas mode: EXECUTION_MODE=gas');
+    if (!IS_LOCAL_OPERATION) {
+      console.error('3. Try switching execution mode (gas/drop)');
+      if (EXECUTION_MODE === 'drop') {
+        console.error('4. Try increasing GAS_DROP_LIMIT');
+        console.error('5. Or switch to gas mode: EXECUTION_MODE=gas');
+      }
+      console.error('6. Check network connectivity and RPC endpoint');
+      console.error('7. Verify address format:');
+      console.error('   - Ethereum: 0x1234...5678 (42 chars)');
+      console.error('   - Solana: 2ujBt...JSeN9 (32-44 chars, base58)');
+      console.error('8. Ensure target chain matches address type:');
+      console.error('   - API_DST_CHAIN=1 for Solana addresses');
+      console.error('   - API_DST_CHAIN!=1 for Ethereum addresses');
+      if (API_DST_CHAIN === 1) {
+        console.error('9. For Solana token transfers:');
+        console.error('   - Set SOLANA_TOKEN_MINT to the token mint address');
+        console.error('   - Or set USE_ATA_FOR_SOLANA=false to use EOA directly');
+        console.error('   - Install @solana/web3.js and @solana/spl-token for ATA support');
+      }
+      console.error('10. Ensure binary-layout is installed:');
+      console.error('    npm install binary-layout');
+    } else {
+      console.error('3. For local operations, ensure RECIPIENT is a valid Ethereum address');
+      console.error('4. Or leave RECIPIENT blank to use your own wallet address');
     }
-    console.error('6. Check network connectivity and RPC endpoint');
-    console.error('7. Verify address format:');
-    console.error('   - Ethereum: 0x1234...5678 (42 chars)');
-    console.error('   - Solana: 2ujBt...JSeN9 (32-44 chars, base58)');
-    console.error('8. Ensure target chain matches address type:');
-    console.error('   - API_DST_CHAIN=1 for Solana addresses');
-    console.error('   - API_DST_CHAIN!=1 for Ethereum addresses');
-    if (API_DST_CHAIN === 1) {
-      console.error('9. For Solana token transfers:');
-      console.error('   - Set SOLANA_TOKEN_MINT to the token mint address');
-      console.error('   - Or set USE_ATA_FOR_SOLANA=false to use EOA directly');
-      console.error('   - Install @solana/web3.js and @solana/spl-token for ATA support');
-    }
-    console.error('10. Ensure binary-layout is installed:');
-    console.error('    npm install binary-layout');
     
     process.exit(1);
   }
