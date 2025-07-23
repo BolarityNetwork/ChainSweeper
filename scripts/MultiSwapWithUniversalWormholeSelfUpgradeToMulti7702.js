@@ -30,8 +30,12 @@ const ARBITER_FEE    = BigInt(process.env.ARBITER_FEE || '0');
 const MAX_TOKENS_PER_BATCH = parseInt(process.env.MAX_TOKENS_PER_BATCH || '3');
 const ENABLE_AUTO_BATCHING = process.env.ENABLE_AUTO_BATCHING !== 'false';
 
+// 🔧 添加本链交换判断
+const IS_LOCAL_SWAP = DST_CHAIN_ID === 0;
+
 console.log(`📦 Smart Batching: ${ENABLE_AUTO_BATCHING ? 'Enabled' : 'Disabled'}`);
 console.log(`🔢 Max tokens per batch: ${MAX_TOKENS_PER_BATCH}`);
+console.log(`🏠 Transaction type: ${IS_LOCAL_SWAP ? 'Local Swap Only' : 'Cross-chain Bridge'}`);
 
 const TOKENS = [
   {
@@ -153,6 +157,12 @@ function v3Path(tokenA, tokenB, fee) {
 }
 
 async function getWormholeFee(provider, coreAddress) {
+  // 🔧 本链交换时跳过 Wormhole fee 查询
+  if (IS_LOCAL_SWAP) {
+    console.log('🏠 Local swap detected - Skipping Wormhole fee query');
+    return BigInt('0');
+  }
+  
   if (!coreAddress || coreAddress === ZeroHash) {
     console.log('⚠️  No Wormhole core address provided, using default fee');
     return BigInt('100000000000000'); // 0.0001 ETH default
@@ -308,6 +318,7 @@ function askUserChoice() {
     console.log('\n📋 ====== CONFIGURATION SUMMARY ======');
     console.log(`📨 Recipient: ${RECIPIENT}`);
     console.log(`🌉 Destination Chain: ${DST_CHAIN_ID}`);
+    console.log(`🏠 Transaction Mode: ${IS_LOCAL_SWAP ? 'LOCAL SWAP ONLY' : 'CROSS-CHAIN BRIDGE'}`);
     console.log(`🎯 DustCollector Contract: ${COLLECTOR}`);
     console.log(`🔢 Tokens to process: ${TOKENS.length}`);
     console.log(`💰 Arbiter Fee: ${ARBITER_FEE} wei`);
@@ -318,13 +329,18 @@ function askUserChoice() {
     
     console.log(`👛 Wallet: ${wallet.address}`);
     
-    // Process recipient address
+    // Process recipient address - 保留recipient处理，无论本地还是跨链
     let recipientBytes32 = ZeroHash;
     if (RECIPIENT && RECIPIENT !== ZeroHash) {
       const addressType = detectAddressType(RECIPIENT);
       console.log(`🎯 Detected recipient address type: ${addressType.toUpperCase()}`);
       recipientBytes32 = addressToBytes32(RECIPIENT);
       console.log(`📨 Recipient (bytes32): ${recipientBytes32}`);
+      if (IS_LOCAL_SWAP) {
+        console.log(`🏠 Local swap mode - Recipient will be used for local processing`);
+      }
+    } else {
+      console.log(`📨 No recipient specified - Using zero address`);
     }
     
     // Parse token amounts and check balances
@@ -349,21 +365,24 @@ function askUserChoice() {
     // Step 1: Ensure delegation
     await delegateToContract(wallet, provider, COLLECTOR);
 
-    // Step 2: Calculate Wormhole fee (if bridging)
-    console.log('\n💰 ====== CALCULATING WORMHOLE FEES ======');
+    // Step 2: Calculate Wormhole fee (跨链时才查询)
+    console.log('\n💰 ====== CALCULATING FEES ======');
     const WORMHOLE_CORE = process.env.WORMHOLE_CORE;
     let wormholeFee = BigInt('0');
     
-    if (DST_CHAIN_ID > 0 && recipientBytes32 !== ZeroHash) {
+    if (IS_LOCAL_SWAP) {
+      console.log(`🏠 Local swap mode - No cross-chain fees required`);
+    } else if (recipientBytes32 !== ZeroHash) {
       wormholeFee = await getWormholeFee(provider, WORMHOLE_CORE);
       console.log(`🌉 Cross-chain transfer enabled - Fee: ${wormholeFee} wei`);
     } else {
-      console.log(`📍 Local swap only - No cross-chain fees`);
+      console.log(`📍 Cross-chain mode but no valid recipient - Processing as local swap`);
     }
 
     // Add buffer for transaction execution
-    const buffer = BigInt('5000000000000000'); // 0.005 ETH buffer
-    const totalMsgValue = wormholeFee + buffer;
+    // 🔧 本链交换无需msg.value，只有跨链才需要支付费用
+
+    const totalMsgValue = wormholeFee;
     
     console.log(`💰 Total value to send: ${totalMsgValue} wei`);
 
@@ -401,10 +420,6 @@ function askUserChoice() {
     const expectedSelector = contract.interface.getFunction('batchCollectWithUniversalRouter7702').selector;
     console.log(`Expected function selector: ${expectedSelector}`);
     
-    // Double-check the function signature
-    const functionFragment = contract.interface.getFunction('batchCollectWithUniversalRouter7702');
-    console.log(`Function format: ${functionFragment.format('full')}`);
-    
     // Create minimal test ABI to verify selector
     const testABI = [
       "function batchCollectWithUniversalRouter7702((bytes,bytes[],uint256,address,uint16,bytes32,uint256),address[],uint256[]) payable"
@@ -414,7 +429,7 @@ function askUserChoice() {
     console.log(`Test selector: ${testSelector}`);
     console.log(`Selectors match: ${expectedSelector === testSelector}`);
     
-    // Prepare SwapParams structure (simplified for Wormhole)
+    // Prepare SwapParams structure (简化本链交换参数)
     const swapParams = {
       commands,
       inputs,
@@ -422,7 +437,7 @@ function askUserChoice() {
       targetToken: TARGET,
       dstChain: DST_CHAIN_ID,
       recipient: recipientBytes32,
-      arbiterFee: ARBITER_FEE
+      arbiterFee: IS_LOCAL_SWAP ? BigInt('0') : ARBITER_FEE // 本链交换时无需arbiter fee
     };
     
     console.log('\n📋 ====== TRANSACTION PARAMETERS ======');
@@ -442,32 +457,54 @@ function askUserChoice() {
     console.log(`Amounts array length: ${amounts.length}`);
     console.log(`All amounts > 0: ${amounts.every(amt => amt > 0)}`);
     console.log(`Deadline > now: ${swapParams.deadline > Math.floor(Date.now() / 1000)}`);
+    console.log(`Transaction mode: ${IS_LOCAL_SWAP ? 'LOCAL' : 'CROSS-CHAIN'}`);
     
-    // Log the raw commands and inputs for debugging
-    console.log(`Commands (hex): ${swapParams.commands}`);
-    console.log(`First input preview: ${swapParams.inputs[0].substring(0, 100)}...`);
+    // 🔧 本链交换时跳过跨链相关的验证
+    if (!IS_LOCAL_SWAP) {
+      console.log('\n🌉 ====== CROSS-CHAIN VALIDATION ======');
+      console.log(`Destination chain > 0: ${swapParams.dstChain > 0}`);
+      console.log(`Has valid recipient: ${swapParams.recipient !== ZeroHash}`);
+      console.log(`Wormhole fee calculated: ${wormholeFee > 0}`);
+    } else {
+      console.log('\n🏠 ====== LOCAL SWAP VALIDATION ======');
+      console.log(`✅ Local swap mode - Skipping cross-chain validations`);
+    }
     
-    // Debug contract state before gas estimation
+    // Debug contract state before gas estimation (跨链时才检查bridge相关)
     console.log('\n🔍 ====== CONTRACT STATE DEBUGGING ======');
     try {
       // Check if contract has required methods
       const contractWithSigner = new Contract(COLLECTOR, [
         'function router() external view returns (address)',
-        'function bridge() external view returns (address)', 
-        'function core() external view returns (address)',
+        ...(IS_LOCAL_SWAP ? [] : [
+          'function bridge() external view returns (address)', 
+          'function core() external view returns (address)'
+        ]),
         'function feeConfig() external view returns (address)',
         'function getCurrentFeeConfig() external view returns (uint256, address)'
       ], wallet);
       
       console.log('📋 Checking contract dependencies...');
       const routerAddr = await contractWithSigner.router();
-      const bridgeAddr = await contractWithSigner.bridge();
-      const coreAddr = await contractWithSigner.core();
-      const feeConfigAddr = await contractWithSigner.feeConfig();
-      
       console.log(`🔧 Router: ${routerAddr}`);
-      console.log(`🌉 Bridge: ${bridgeAddr}`);
-      console.log(`💎 Core: ${coreAddr}`);
+      
+      // 本链交换时跳过bridge相关检查
+      if (!IS_LOCAL_SWAP) {
+        const bridgeAddr = await contractWithSigner.bridge();
+        const coreAddr = await contractWithSigner.core();
+        console.log(`🌉 Bridge: ${bridgeAddr}`);
+        console.log(`💎 Core: ${coreAddr}`);
+        
+        // Verify bridge components are not zero addresses
+        const zeroAddr = '0x0000000000000000000000000000000000000000';
+        if ([bridgeAddr, coreAddr].includes(zeroAddr)) {
+          throw new Error('❌ One or more bridge components are zero addresses');
+        }
+      } else {
+        console.log(`🏠 Local swap mode - Skipping bridge component checks`);
+      }
+      
+      const feeConfigAddr = await contractWithSigner.feeConfig();
       console.log(`⚙️  FeeConfig: ${feeConfigAddr}`);
       
       // Check fee config
@@ -475,18 +512,22 @@ function askUserChoice() {
       console.log(`💰 Fee BPS: ${feeBps}`);
       console.log(`💳 Fee Collector: ${feeCollector}`);
       
-      // Verify none are zero addresses
-      const zeroAddr = '0x0000000000000000000000000000000000000000';
-      if ([routerAddr, bridgeAddr, coreAddr, feeConfigAddr].includes(zeroAddr)) {
-        throw new Error('❌ One or more contract dependencies are zero addresses');
-      }
-      
     } catch (debugError) {
       console.error(`⚠️  Contract debug failed: ${debugError.message}`);
     }
 
     // Gas estimation with better error handling
     console.log('\n⛽ ====== GAS ESTIMATION ======');
+    
+    // 🔧 检查账户ETH余额
+    const ethBalance = await provider.getBalance(wallet.address);
+    console.log(`💰 Current ETH balance: ${ethBalance} wei (${(Number(ethBalance) / 1e18).toFixed(6)} ETH)`);
+    console.log(`💰 Required msg.value: ${totalMsgValue} wei (${(Number(totalMsgValue) / 1e18).toFixed(6)} ETH)`);
+    
+    if (ethBalance < totalMsgValue) {
+      throw new Error(`Insufficient ETH balance for msg.value: have ${ethBalance}, need ${totalMsgValue}`);
+    }
+    
     try {
       const estimatedGas = await contract.batchCollectWithUniversalRouter7702.estimateGas(
         swapParams,
@@ -498,6 +539,18 @@ function askUserChoice() {
         }
       );
       console.log(`✅ Estimated gas: ${estimatedGas}`);
+      
+      // 🔧 估算总gas费用
+      const gasPrice = await provider.getFeeData();
+      const maxGasCost = estimatedGas * (gasPrice.maxFeePerGas || gasPrice.gasPrice || BigInt('20000000000'));
+      console.log(`⛽ Estimated max gas cost: ${maxGasCost} wei (${(Number(maxGasCost) / 1e18).toFixed(6)} ETH)`);
+      
+      if (ethBalance < maxGasCost + totalMsgValue) {
+        console.warn(`⚠️  Warning: ETH balance may be insufficient for gas + value`);
+        console.warn(`   Balance: ${(Number(ethBalance) / 1e18).toFixed(6)} ETH`);
+        console.warn(`   Estimated need: ${(Number(maxGasCost + totalMsgValue) / 1e18).toFixed(6)} ETH`);
+      }
+      
     } catch (gasError) {
       console.error(`❌ Gas estimation failed: ${gasError.message}`);
       
@@ -512,35 +565,8 @@ function askUserChoice() {
         console.log(`❌ EOA not properly delegated. Code: ${currentCode}`);
       }
       
-      // Try a direct call to see if we get more info
-      console.log('\n🔬 ====== TRYING DIRECT CALL FOR DEBUG ======');
-      try {
-        await provider.call({
-          to: wallet.address,
-          from: wallet.address,
-          data: contract.interface.encodeFunctionData('batchCollectWithUniversalRouter7702', [
-            swapParams,
-            tokens, 
-            amounts
-          ]),
-          value: totalMsgValue
-        });
-      } catch (callError) {
-        console.error(`🔍 Direct call error: ${callError.message}`);
-        if (callError.data) {
-          console.log(`🔍 Error data: ${callError.data}`);
-        }
-      }
-      
-      // Also try to skip gas estimation and send directly if user wants
-      console.log('\n💡 ====== ALTERNATIVE APPROACH ======');
-      console.log('❓ Since gas estimation failed, you can try sending the transaction directly.');
-      console.log('⚠️  This bypasses gas estimation but may still fail if there are other issues.');
-      console.log('💡 Add environment variable SKIP_GAS_ESTIMATION=true to try this approach.');
-      
       if (process.env.SKIP_GAS_ESTIMATION === 'true') {
         console.log('🚀 Skipping gas estimation and sending transaction directly...');
-        // Continue to the send transaction section
       } else {
         throw new Error(`Gas estimation failed: ${gasError.message}`);
       }
@@ -551,13 +577,16 @@ function askUserChoice() {
     
     const baseGas = 300000n; // 基础gas
     const gasPerToken = 120000n; // 每个token的gas成本
-    const bridgeGas = DST_CHAIN_ID > 0 ? 200000n : 0n; // 跨链额外gas
+    const bridgeGas = IS_LOCAL_SWAP ? 0n : 200000n; // 本链交换无需bridge gas
     const dynamicGasLimit = baseGas + (gasPerToken * BigInt(TOKENS.length)) + bridgeGas;
+    const maxGasLimit = IS_LOCAL_SWAP ? 2000000n : 3000000n; // 本链交换降低gas上限
     const finalGasLimit = dynamicGasLimit < 1500000n ? 1500000n : 
-                         dynamicGasLimit > 3000000n ? 3000000n : 
+                         dynamicGasLimit > maxGasLimit ? maxGasLimit : 
                          dynamicGasLimit;
     
-    console.log(`⛽ Gas limit: ${finalGasLimit}`);
+    console.log(`⛽ Gas limit: ${finalGasLimit} (${IS_LOCAL_SWAP ? 'Local' : 'Cross-chain'} mode)`);
+    console.log(`💰 Msg.value: ${totalMsgValue} wei (${(Number(totalMsgValue) / 1e18).toFixed(6)} ETH)`);
+    console.log(`🔧 Transaction type: ${IS_LOCAL_SWAP ? 'Local Swap - No ETH transfer needed' : 'Cross-chain - ETH for fees'}`);
     
     let tx;
     try {
@@ -609,11 +638,17 @@ function askUserChoice() {
       console.log('2️⃣  ✅ Direct token transfer to UniversalRouter');
       console.log('3️⃣  ✅ Token swap executed');
       
-      if (DST_CHAIN_ID > 0 && recipientBytes32 !== ZeroHash) {
+      if (IS_LOCAL_SWAP) {
+        console.log('4️⃣  ✅ Local swap completed (no bridge required)');
+        console.log(`🏠 All tokens swapped to ${TARGET} and kept in wallet`);
+        if (recipientBytes32 !== ZeroHash) {
+          console.log(`📨 Recipient parameter preserved: ${RECIPIENT}`);
+        }
+      } else if (recipientBytes32 !== ZeroHash) {
         console.log('4️⃣  ✅ Wormhole cross-chain bridge completed');
         console.log(`📨 Recipient: ${RECIPIENT}`);
       } else {
-        console.log('4️⃣  ✅ Local swap completed (no bridge)');
+        console.log('4️⃣  ✅ Local swap completed (no valid bridge recipient)');
       }
       
       // Ask about delegation management

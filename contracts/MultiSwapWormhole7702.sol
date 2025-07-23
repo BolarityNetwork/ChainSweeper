@@ -92,7 +92,7 @@ contract DustCollector7702Wormhole is Ownable {
     }
 
     function _msgFee(SwapParams calldata p) internal view returns (uint256) {
-        if (p.dstChain == 0 && p.recipient == bytes32(0) && p.arbiterFee == 0) return 0;
+        if (p.dstChain == 0) return 0;
         uint256 fee = core.messageFee();
         require(msg.value >= fee, "fee underflow");
         return fee;
@@ -110,8 +110,11 @@ contract DustCollector7702Wormhole is Ownable {
             emit FeeCollected(p.targetToken, feeAmt);
         }
 
-        if (p.dstChain == 0 && p.recipient == bytes32(0) && p.arbiterFee == 0) {
-            emit Swapped(address(this), p.targetToken, userAmt);
+        if (p.dstChain == 0) {
+            // 本地操作
+            address localRecipient = (p.recipient == bytes32(0)) ? address(this) : address(uint160(uint256(p.recipient)));
+            IERC20(p.targetToken).safeTransfer(localRecipient, userAmt);
+            emit Swapped(msg.sender, p.targetToken, userAmt);
         } else {
             _bridgeTokens(p, userAmt);
         }
