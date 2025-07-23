@@ -1,10 +1,14 @@
 {
   "base": {
-    "wormhole_7702_collector": "0xbA636D5340209492096758A0DcdE0AC2b1659f57",
-    "cctp_7702_collector": "0x6094Fe8437dd5853B928F40A278c0cDFBf629014",
     "cctp_main_collector": {
-      "type": "config",
-      "address": "0xFc447b942A084314dd554b7C4CDE9a8659631c4C"
+      "cctp_7702_collector": "0x6094Fe8437dd5853B928F40A278c0cDFBf629014",
+      "config address for 7702": "0x9D7227D1EcF129e7E481FFA9e64BB96448EDb68d",
+      "permit2 address":"0xFc447b942A084314dd554b7C4CDE9a8659631c4C"
+    },
+    "wormhole_main_collector": {
+      "wormhole_7702_collector": "0xbA636D5340209492096758A0DcdE0AC2b1659f57",
+      "config address for 7702": "0x9D7227D1EcF129e7E481FFA9e64BB96448EDb68d",
+      "permit2 address":"0xFc447b942A084314dd554b7C4CDE9a8659631c4C"
     }
   }
 }
