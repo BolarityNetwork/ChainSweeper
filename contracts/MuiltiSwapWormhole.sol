@@ -135,7 +135,8 @@ contract DustCollectorUniversalPermit2 is Ownable {
 
     /* -------- internal: fee calc -------- */
     function _msgFee(SwapParams calldata p) internal view returns (uint256) {
-        if (p.dstChain == 0 && p.recipient == bytes32(0) && p.arbiterFee == 0) return 0;
+        // 只有跨链时才需要 wormhole 费用
+        if (p.dstChain == 0) return 0;
         uint256 fee = core.messageFee();
         require(msg.value >= fee , "fee underflow");
         return fee;
@@ -151,8 +152,10 @@ contract DustCollectorUniversalPermit2 is Ownable {
             emit FeeCollected(p.targetToken, feeAmt);
         }
 
-        if (p.dstChain == 0 && p.recipient == bytes32(0) && p.arbiterFee == 0) {
-            IERC20(p.targetToken).safeTransfer(msg.sender, userAmt);
+        if (p.dstChain == 0) {
+            // 本地操作
+            address localRecipient = (p.recipient == bytes32(0)) ? msg.sender : address(uint160(uint256(p.recipient)));
+            IERC20(p.targetToken).safeTransfer(localRecipient, userAmt);
             emit Swapped(msg.sender, p.targetToken, userAmt);
         } else {
             _bridgeTokens(p, userAmt);
@@ -178,6 +181,13 @@ contract DustCollectorUniversalPermit2 is Ownable {
     /* rescue */
     function rescueERC20(address t, address to, uint256 amt) external onlyOwner {
         IERC20(t).safeTransfer(to, amt);
+    }
+
+    function rescueETH(address payable to, uint256 amt) external onlyOwner {
+        require(to != address(0), "zero addr");
+        require(amt <= address(this).balance, "insufficient balance");
+        (bool success, ) = to.call{value: amt}("");
+        require(success, "ETH transfer failed");
     }
 
     receive() external payable {}

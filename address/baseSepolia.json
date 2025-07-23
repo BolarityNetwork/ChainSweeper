@@ -1,0 +1,17 @@
+{
+  "base": {
+    "Wormhole_main_collector": {
+      "cctp_7702_delegator": "0xFc447b942A084314dd554b7C4CDE9a8659631c4C",
+      "config_address_for_7702": "0x6E8E50e08A8a74314f2536e1b9c2105233CA46fF",
+      "permit2_wormhole_address":"0x6E8E50e08A8a74314f2536e1b9c2105233CA46fF",
+      "approve_wormhole_address ": "0x1690f5AB4e71e11d623a42D84e1B1ED120dD99C4"
+    },
+    "cctp_main_collector": {
+      "config_address_for_7702": "config_address_for_7702",
+      "cctp_7702_collector": "0xE0166322CFA24d22825123103aC531f056F8a30B",
+      "permit2_cctp_address":"0xE0166322CFA24d22825123103aC531f056F8a30B",
+      "approve_cctp_address ": "0x69ff3e6d2d53f7D8719C42a8d072509dF9862C6d"
+    }
+    
+  }
+}

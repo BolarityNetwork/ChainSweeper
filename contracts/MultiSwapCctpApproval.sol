@@ -9,10 +9,6 @@ interface IUniversalRouter {
     function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable;
 }
 
-interface IPermit2 {
-    function transferFrom(address from, address to, uint160 amount, address token) external;
-}
-
 interface ICCTPv2WithExecutor {
     function depositForBurn(
         uint256 amount,
@@ -39,11 +35,10 @@ struct FeeArgs {
     address payee;
 }
 
-contract DustCollectorUniversalPermit2 is Ownable {
+contract DustCollectorStandardApproval is Ownable {
     using SafeERC20 for IERC20;
 
     IUniversalRouter public immutable router;
-    IPermit2 public immutable permit2;
     ICCTPv2WithExecutor public immutable cctp;
 
     address public feeCollector;
@@ -70,10 +65,9 @@ contract DustCollectorUniversalPermit2 is Ownable {
     event Swapped(address indexed user, address indexed token, uint256 amount);
     event Bridged(address indexed user, address indexed token, uint256 amount, uint16 dstChain, bytes32 recipient);
 
-    constructor(address _router, address _permit2, address _cctp, address _feeCollector) Ownable(msg.sender) {
-        require(_router != address(0) && _permit2 != address(0) && _cctp != address(0) && _feeCollector != address(0), "zero addr");
+    constructor(address _router, address _cctp, address _feeCollector) Ownable(msg.sender) {
+        require(_router != address(0) && _cctp != address(0) && _feeCollector != address(0), "zero addr");
         router = IUniversalRouter(_router);
-        permit2 = IPermit2(_permit2);
         cctp = ICCTPv2WithExecutor(_cctp);
         feeCollector = _feeCollector;
     }
@@ -99,7 +93,7 @@ contract DustCollectorUniversalPermit2 is Ownable {
 
     function _pullAndForward(address[] calldata tokens, uint256[] calldata amounts) internal {
         for (uint256 i; i < tokens.length; ++i) {
-            permit2.transferFrom(msg.sender, address(this), uint160(amounts[i]), tokens[i]);
+            IERC20(tokens[i]).transferFrom(msg.sender, address(this), amounts[i]);
             IERC20(tokens[i]).safeTransfer(address(router), amounts[i]);
         }
     }
@@ -157,13 +151,6 @@ contract DustCollectorUniversalPermit2 is Ownable {
 
     function rescueERC20(address t, address to, uint256 amt) external onlyOwner {
         IERC20(t).safeTransfer(to, amt);
-    }
-
-    function rescueETH(address payable to, uint256 amt) external onlyOwner {
-        require(to != address(0), "zero addr");
-        require(amt <= address(this).balance, "insufficient balance");
-        (bool success, ) = to.call{value: amt}("");
-        require(success, "ETH transfer failed");
     }
 
     receive() external payable {}
