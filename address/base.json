@@ -4,7 +4,7 @@
       "cctp_7702_collector": "0x6094Fe8437dd5853B928F40A278c0cDFBf629014",
       "config address for 7702": "0x9D7227D1EcF129e7E481FFA9e64BB96448EDb68d",
       "permit2 address":"0xFc447b942A084314dd554b7C4CDE9a8659631c4C",
-      "approve address ": "0x36f58164F2Ebf390FEC05E49f681AABe9abebE70"
+      "approve address ": "0xc310d8D806c61083c49184C0d45aD7c04092fb24"
     },
     "wormhole_main_collector": {
       "wormhole_7702_collector": "0xbA636D5340209492096758A0DcdE0AC2b1659f57",
